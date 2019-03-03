@@ -1,3 +1,7 @@
+;;; init-editing-utils.el --- Day-to-day editing helpers -*- lexical-binding: t -*-
+;;; Commentary:
+;;; Code:
+
 (require-package 'unfill)
 
 (when (fboundp 'electric-pair-mode)
@@ -32,27 +36,35 @@
 (add-hook 'after-init-hook 'global-auto-revert-mode)
 (setq global-auto-revert-non-file-buffers t
       auto-revert-verbose nil)
+(after-load 'autorevert
+  (diminish 'auto-revert-mode))
 
 (add-hook 'after-init-hook 'transient-mark-mode)
 
 
-(when (maybe-require-package 'dynamic-spaces)
-  (dynamic-spaces-global-mode))
+
+;; Huge files
 
- ;;; A simple visible bell which works in all terminal types
+(require-package 'vlf)
 
-(defun sanityinc/flash-mode-line ()
-  (invert-face 'mode-line)
-  (run-with-timer 0.05 nil 'invert-face 'mode-line))
+(defun ffap-vlf ()
+  "Find file at point with VLF."
+  (interactive)
+  (let ((file (ffap-file-at-point)))
+    (unless (file-exists-p file)
+      (error "File does not exist: %s" file))
+    (vlf file)))
 
-(setq-default
- ring-bell-function 'sanityinc/flash-mode-line)
+
+;;; A simple visible bell which works in all terminal types
+(require-package 'mode-line-bell)
+(add-hook 'after-init-hook 'mode-line-bell-mode)
 
 
 
 (when (maybe-require-package 'beacon)
   (setq-default beacon-lighter "")
-  (setq-default beacon-size 5)
+  (setq-default beacon-size 20)
   (add-hook 'after-init-hook 'beacon-mode))
 
 
@@ -75,8 +87,9 @@
 
 
 
-(unless (fboundp 'display-line-numbers-mode)
-  (require-package 'nlinum))
+(when (fboundp 'display-line-numbers-mode)
+  (setq display-line-numbers-width 3)
+  (add-hook 'prog-mode-hook 'display-line-numbers-mode))
 
 
 (when (require-package 'rainbow-delimiters)
@@ -88,17 +101,12 @@
   (add-hook 'after-init-hook 'global-prettify-symbols-mode))
 
 
-(require-package 'undo-tree)
-(add-hook 'after-init-hook 'global-undo-tree-mode)
-(after-load 'undo-tree
-  (diminish 'undo-tree-mode))
-
-
 (when (maybe-require-package 'symbol-overlay)
-  (dolist (hook '(prog-mode-hook html-mode-hook css-mode-hook))
+  (dolist (hook '(prog-mode-hook html-mode-hook yaml-mode-hook conf-mode-hook))
     (add-hook hook 'symbol-overlay-mode))
   (after-load 'symbol-overlay
     (diminish 'symbol-overlay-mode)
+    (define-key symbol-overlay-mode-map (kbd "M-i") 'symbol-overlay-put)
     (define-key symbol-overlay-mode-map (kbd "M-n") 'symbol-overlay-jump-next)
     (define-key symbol-overlay-mode-map (kbd "M-p") 'symbol-overlay-jump-prev)))
 
@@ -216,16 +224,16 @@
 ;;----------------------------------------------------------------------------
 ;; Fix backward-up-list to understand quotes, see http://bit.ly/h7mdIL
 ;;----------------------------------------------------------------------------
-(defun backward-up-sexp (arg)
+(defun sanityinc/backward-up-sexp (arg)
   "Jump up to the start of the ARG'th enclosing sexp."
   (interactive "p")
   (let ((ppss (syntax-ppss)))
     (cond ((elt ppss 3)
            (goto-char (elt ppss 8))
-           (backward-up-sexp (1- arg)))
+           (sanityinc/backward-up-sexp (1- arg)))
           ((backward-up-list arg)))))
 
-(global-set-key [remap backward-up-list] 'backward-up-sexp) ; C-M-u, C-M-up
+(global-set-key [remap backward-up-list] 'sanityinc/backward-up-sexp) ; C-M-u, C-M-up
 
 
 ;;----------------------------------------------------------------------------
@@ -234,25 +242,31 @@
 (require-package 'whole-line-or-region)
 (add-hook 'after-init-hook 'whole-line-or-region-mode)
 (after-load 'whole-line-or-region
-  (diminish 'whole-line-or-region-mode))
+  (diminish 'whole-line-or-region-local-mode))
 
-(defun suspend-mode-during-cua-rect-selection (mode-name)
+
+;; Some local minor modes clash with CUA rectangle selection
+
+(defvar-local sanityinc/suspended-modes-during-cua-rect nil
+  "Modes that should be re-activated when cua-rect selection is done.")
+
+(eval-after-load 'cua-rect
+  (advice-add 'cua--deactivate-rectangle :after
+              (lambda (&rest _)
+                (dolist (m sanityinc/suspended-modes-during-cua-rect)
+                  (funcall m 1)
+                  (setq sanityinc/suspended-modes-during-cua-rect nil)))))
+
+(defun sanityinc/suspend-mode-during-cua-rect-selection (mode-name)
   "Add an advice to suspend `MODE-NAME' while selecting a CUA rectangle."
-  (let ((flagvar (intern (format "%s-was-active-before-cua-rectangle" mode-name)))
-        (advice-name (intern (format "suspend-%s" mode-name))))
-    (eval-after-load 'cua-rect
-      `(progn
-         (defvar ,flagvar nil)
-         (make-variable-buffer-local ',flagvar)
-         (defadvice cua--activate-rectangle (after ,advice-name activate)
-           (setq ,flagvar (and (boundp ',mode-name) ,mode-name))
-           (when ,flagvar
-             (,mode-name 0)))
-         (defadvice cua--deactivate-rectangle (after ,advice-name activate)
-           (when ,flagvar
-             (,mode-name 1)))))))
+  (eval-after-load 'cua-rect
+    (advice-add 'cua--activate-rectangle :after
+                (lambda (&rest _)
+                  (when (bound-and-true-p mode-name)
+                    (push mode-name sanityinc/suspended-modes-during-cua-rect)
+                    (funcall mode-name 0))))))
 
-(suspend-mode-during-cua-rect-selection 'whole-line-or-region-mode)
+(sanityinc/suspend-mode-during-cua-rect-selection 'whole-line-or-region-local-mode)
 
 
 
@@ -290,8 +304,8 @@ With arg N, insert N newlines."
 ;;----------------------------------------------------------------------------
 ;; Random line sorting
 ;;----------------------------------------------------------------------------
-(defun sort-lines-random (beg end)
-  "Sort lines in region randomly."
+(defun sanityinc/sort-lines-random (beg end)
+  "Sort lines in region from BEG to END randomly."
   (interactive "r")
   (save-excursion
     (save-restriction
@@ -310,10 +324,11 @@ With arg N, insert N newlines."
 
 
 (require-package 'guide-key)
-(setq guide-key/guide-key-sequence '("C-x" "C-c" "C-x 4" "C-x 5" "C-c ;" "C-c ; f" "C-c ' f" "C-x n" "C-x C-r" "C-x r" "M-s" "C-h" "C-c C-a"))
+(setq guide-key/guide-key-sequence t)
 (add-hook 'after-init-hook 'guide-key-mode)
 (after-load 'guide-key
   (diminish 'guide-key-mode))
 
 
 (provide 'init-editing-utils)
+;;; init-editing-utils.el ends here

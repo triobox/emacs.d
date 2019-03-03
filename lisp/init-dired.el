@@ -1,4 +1,6 @@
-(require-package 'dired-sort)
+;;; init-dired.el --- Dired customisations -*- lexical-binding: t -*-
+;;; Commentary:
+;;; Code:
 
 (setq-default dired-dwim-target t)
 
@@ -11,15 +13,13 @@
     (diredfl-global-mode)))
 
 (after-load 'dired
-  (require 'dired-sort)
   (setq dired-recursive-deletes 'top)
   (define-key dired-mode-map [mouse-2] 'dired-find-file)
-  (define-key dired-mode-map (kbd "C-c C-p") 'wdired-change-to-wdired-mode)
-  (add-hook 'dired-mode-hook
-            (lambda () (guide-key/add-local-guide-key-sequence "%"))))
+  (define-key dired-mode-map (kbd "C-c C-q") 'wdired-change-to-wdired-mode))
 
 (when (maybe-require-package 'diff-hl)
   (after-load 'dired
     (add-hook 'dired-mode-hook 'diff-hl-dired-mode)))
 
 (provide 'init-dired)
+;;; init-dired.el ends here
